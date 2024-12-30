@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -19,6 +18,8 @@ const (
 	SERVER_HOST = "localhost"
 	SERVER_PORT = "8090"
 	SERVER_TYPE = "tcp"
+
+	SYSTEM_CHAT_NAME_COLOR = color.BgHiBlue
 )
 
 var (
@@ -31,8 +32,12 @@ var (
 		color.BgBlue,
 		color.BgCyan,
 		color.BgGreen,
-		color.BgYellow,
 		color.BgMagenta,
+		color.BgHiBlack,
+		color.BgHiRed,
+		color.BgHiCyan,
+		color.BgHiGreen,
+		color.BgHiMagenta,
 	}
 )
 
@@ -42,27 +47,27 @@ type Connection struct {
 }
 
 type Message struct {
+	Ok              bool
 	Author          string
 	Text            string
 	AuthorNameColor color.Attribute
 }
 
 func main() {
-	fmt.Println("Server running")
 	server, err := net.Listen(SERVER_TYPE, SERVER_HOST + ":" + SERVER_PORT)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer server.Close()
 
-	fmt.Println("Server started")
+	log.Println("Server started")
 
 	for {
 		conn, err := server.Accept()
 		if err != nil {
 			log.Fatal(err)
 		}
-
+	
 		go handleClient(conn)
 	}
 }
@@ -89,7 +94,11 @@ func handleClient(conn net.Conn) {
 	roomIDString = strings.TrimSpace(roomIDString)
 	roomID, err := strconv.Atoi(roomIDString)
 	if err != nil {
-		fmt.Printf("invalid room ID: %s\n", err.Error())
+		msgJSON, err := json.Marshal(&Message{Ok: false, Author: "🔧 System", Text: "Invalid room ID", AuthorNameColor: SYSTEM_CHAT_NAME_COLOR})
+		if err != nil {
+			log.Fatal(err)
+		}
+		broadcastPrivateMessage(append(msgJSON, '\n'), conn)
 		return
 	}
 
@@ -104,16 +113,12 @@ func handleClient(conn net.Conn) {
 	for {
 		msg, err := reader.ReadString('\n')
 		if err != nil {
-			if err.Error() == "EOF" {
-				break
-			} else {
-				log.Fatal(err)
-			}
+			return
 		}
-	
+
 		msg = strings.TrimSpace(msg)
-		fmt.Printf("received: %s\n", msg)
-		msgJSON, err := json.Marshal(&Message{Author: name, Text: msg, AuthorNameColor: clientNameColor})
+		log.Printf("received: %s\n", msg)
+		msgJSON, err := json.Marshal(&Message{Ok: true, Author: name, Text: msg, AuthorNameColor: clientNameColor})
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -128,9 +133,19 @@ func broadcastMessage(msg []byte, sender *Connection) {
 	for _, c := range connections {
 		if c.roomID == sender.roomID {
 			if _, err := c.conn.Write(msg); err != nil {
-				log.Printf("Error writing to connection: %s", err)
+				log.Printf("error writing to connection: %s", err)
 			}
+			return
 		}
+	}
+}
+
+func broadcastPrivateMessage(msg []byte, conn net.Conn) {
+	connMutex.Lock()
+	defer connMutex.Unlock()
+
+	if _, err := conn.Write(msg); err != nil {
+		log.Printf("error private writing to connection: %s", err.Error())
 	}
 }
 
@@ -141,7 +156,7 @@ func removeConnection(conn net.Conn) {
 	for i, c := range connections {
 		if c.conn == conn {
 			connections = append(connections[:i], connections[i+1:]...)
-			break
+			return
 		}
 	}
 }

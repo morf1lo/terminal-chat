@@ -20,6 +20,7 @@ const (
 )
 
 type Message struct {
+	Ok              bool
 	Author          string
 	Text            string
 	AuthorNameColor color.Attribute
@@ -44,6 +45,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	go receive(conn)
+
 	fmt.Print("Enter room ID: ")
 	roomID, err := reader.ReadString('\n')
 	if err != nil {
@@ -54,17 +57,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println("To exit: Ctrl + C")
-
-	go receiveMessages(conn)
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	go func ()  {
 		for {
 			data, err := reader.ReadString('\n')
 			if err != nil {
+				if err.Error() == "EOF" {
+					return
+				}
 				log.Fatal(err)
 			}
 
@@ -76,27 +75,33 @@ func main() {
 		}
 	}()
 
-	<-quit
+	fmt.Print("To exit: Ctrl + C\n\n")
 
-	if err := conn.Close(); err != nil {
-		log.Fatal(err)
-	}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 }
 
-func receiveMessages(conn net.Conn) {
+func receive(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	for {
 		msgJSON, err := reader.ReadString('\n')
 		if err != nil {
-			log.Fatal(err)
+			fmt.Printf("error reading input: %s\n", err.Error())
+			return
 		}
 		var msg Message
 		if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
-			log.Fatal(err)
+			log.Printf("error unmarshaling message: %s\n", err.Error())
+			continue
 		}
 
 		out := color.New(msg.AuthorNameColor, color.FgWhite).Add(color.Bold)
 		out.Printf("%s:", msg.Author)
 		fmt.Printf(" %s\n", msg.Text)
+
+		if !msg.Ok {
+			os.Exit(0)
+		}
 	}
 }
